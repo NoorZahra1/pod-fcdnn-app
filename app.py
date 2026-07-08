@@ -78,7 +78,7 @@ h1, h2, h3, .hero-title { font-family: 'Space Grotesk', sans-serif; }
 
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
+header {background: transparent;}
 
 .hero {
     background: linear-gradient(135deg, rgba(34,211,238,0.15), rgba(59,130,246,0.05));
