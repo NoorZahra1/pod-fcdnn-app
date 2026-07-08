@@ -5,3 +5,5 @@ torch>=2.0.0
 matplotlib>=3.7.0
 plotly>=5.14.0
 scikit-learn>=1.3.0
+scipy>=1.10.0
+lic>=0.1.4

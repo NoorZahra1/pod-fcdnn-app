@@ -128,6 +128,103 @@ def load_snapshot_uvp(dat_path: Path) -> Tuple[np.ndarray, np.ndarray]:
     return xvec, xy
 
 
+def load_snapshot_uvp_from_buffer(buffer) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Same as load_snapshot_uvp, but accepts a file-like object (e.g. from
+    st.file_uploader) instead of a filesystem path. Used by the Validation
+    tab so users can upload a ground-truth snapshot without needing the
+    dataset to live on the server's filesystem.
+
+    Args:
+        buffer: A file-like object (must support .seek() to allow the
+                comma/whitespace fallback parse attempt)
+
+    Returns:
+        Same as load_snapshot_uvp: (xvec, xy)
+    """
+    buffer.seek(0)
+    df = pd.read_csv(buffer)
+    if df.shape[1] == 1:
+        buffer.seek(0)
+        df = pd.read_csv(buffer, delim_whitespace=True)
+
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    required_cols = [
+        "nodenumber", "x-coordinate", "y-coordinate",
+        "absolute-pressure", "x-velocity", "y-velocity"
+    ]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Missing columns in uploaded file: {missing}\n"
+            f"Found: {list(df.columns)}"
+        )
+
+    df = df.sort_values("nodenumber", kind="mergesort").reset_index(drop=True)
+
+    u = df["x-velocity"].to_numpy(dtype=np.float64)
+    v = df["y-velocity"].to_numpy(dtype=np.float64)
+    p = df["absolute-pressure"].to_numpy(dtype=np.float64)
+    xy = df[["x-coordinate", "y-coordinate"]].to_numpy(dtype=np.float64)
+
+    xvec = np.hstack([u, v, p])
+    return xvec, xy
+
+
+def infer_architecture(model_state: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Infer FCDNN width/depth from a saved state_dict, since these aren't
+    stored explicitly in the checkpoint. Used by the Model Diagnostics tab.
+
+    Args:
+        model_state: state_dict from a saved FCDNN checkpoint
+
+    Returns:
+        Dict with "width", "depth" (hidden layers), and "out_dim"
+    """
+    linear_weight_keys = sorted(
+        [k for k in model_state.keys() if k.endswith(".weight")],
+        key=lambda k: int(k.split(".")[1])
+    )
+    if not linear_weight_keys:
+        return {"width": 0, "depth": 0, "out_dim": 0}
+
+    first_w = model_state[linear_weight_keys[0]]
+    last_w = model_state[linear_weight_keys[-1]]
+
+    width = int(first_w.shape[0])
+    out_dim = int(last_w.shape[0])
+    depth = max(len(linear_weight_keys) - 1, 0)  # hidden layers, excludes output layer
+
+    return {"width": width, "depth": depth, "out_dim": out_dim}
+
+
+def subsample_indices(n_points: int, cap: int = 45000, seed: int = 42) -> np.ndarray:
+    """
+    For very large meshes (e.g. BFS at 442k nodes), building a Delaunay
+    triangulation and evaluating point-location queries on every node is
+    unnecessarily slow for a visualization that ultimately renders onto a
+    few-hundred-pixel grid. This returns a fixed, reproducible subsample of
+    node indices to use for triangulation/interpolation, capped at `cap`
+    points, which keeps rendering fast without visibly changing the result.
+
+    Args:
+        n_points: total number of mesh nodes
+        cap: maximum number of nodes to keep
+        seed: RNG seed, fixed for reproducibility across reruns
+
+    Returns:
+        Sorted (M,) array of indices, M = min(n_points, cap)
+    """
+    if n_points <= cap:
+        return np.arange(n_points)
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(n_points, size=cap, replace=False)
+    idx.sort()
+    return idx
+
+
 def load_training_snapshots(base_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Load all training snapshots from a directory.
@@ -487,20 +584,29 @@ def compute_errors(
 # ============================================================================
 
 def save_checkpoint(trainer: PODFCDNNTrainer, path: Path) -> None:
-    """Save trained model and POD data using primitive types for maximum safety."""
+    """Save trained model and POD data using primitive types for maximum safety.
+
+    NOTE: keys are flat (pod_mean, pod_phi, ...) to match load_checkpoint(),
+    which expects this exact schema. The previous version of this function
+    wrote a nested "pod_dict" here, which load_checkpoint() could not read.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     checkpoint = {
         "model_state": trainer.model.state_dict(),
-        # Convert the PODModel dataclass cleanly to a standard python dict of arrays
-        "pod_dict": dataclasses.asdict(trainer.pod),
+        "pod_mean": trainer.pod.mean,
+        "pod_phi": trainer.pod.Phi,
+        "pod_svals": trainer.pod.svals,
+        "pod_xy": trainer.pod.xy,
+        "pod_N": trainer.pod.N,
+        "pod_r": trainer.pod.r,
         "x_mean": trainer.x_mean,
         "x_std": trainer.x_std,
         "y_mean": trainer.y_mean,
         "y_std": trainer.y_std,
     }
-    
+
     torch.save(checkpoint, path)
 
 
