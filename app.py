@@ -445,7 +445,7 @@ with tab_overview:
             ax.imshow(blended, origin="lower", extent=[gx.min(), gx.max(), gy.min(), gy.max()], aspect="equal")
             ax.set_xticks([]); ax.set_yticks([])
             for spine in ax.spines.values():
-                spine.set_color("rgba(255,255,255,0.15)")
+                spine.set_color((1, 1, 1, 0.15))
             plt.tight_layout(pad=0.3)
             st.pyplot(fig, use_container_width=True)
             plt.close(fig)
