@@ -93,7 +93,57 @@ Scattered CFD mesh nodes → smooth field images via:
   tool look the user referenced, despite `jet` being perceptually
   non-uniform — this was an explicit user preference, not an oversight.
 
-## Known open items / next steps (not yet done)
+## What the original training notebook revealed (POD_FCDNN_for_cavityflow.ipynb)
+The user shared the original Colab notebook used to train the Cavity model.
+Several important things came out of reviewing it:
+
+1. **Checkpoint schema mismatch, for real this time**: the notebook's actual
+   save cell (`torch.save({"model_state_dict": ..., "pod_Phi": ..., "r_modes":
+   ..., ...})`) uses different key names than what our bundled checkpoints
+   use (`model_state`, `pod_phi`, `pod_r`), and doesn't save `pod_svals` at
+   all. This means if anyone retrains using this notebook as-is and re-saves,
+   the resulting checkpoint would NOT have loaded with our original
+   `load_checkpoint()`. Fixed: `load_checkpoint()` now tries both key
+   schemas via a small `_get(*keys)` helper, and falls back to `NaN` for
+   missing `pod_svals` rather than crashing. The Model Diagnostics tab checks
+   for this and shows an info message instead of plotting garbage.
+
+2. **Established validation convention**: the notebook's own
+   `plot_field_comparison()` function (used to validate against real CFD data
+   at Re=2000 and Re=5000, from a "cavityflow evaluation data" folder) uses a
+   specific, consistent style: **jet** colormap for velocity fields, **RdBu/
+   coolwarm** for pressure, and a separate **inferno**-colored **absolute
+   error** panel with MAE printed in the title (not a signed difference map).
+   The app's Field Explorer and Validation tabs were updated to match this
+   exactly (`FIELD_META` colorscales changed to Jet/RdBu; Validation's third
+   panel now shows absolute error in Inferno with MAE in the title) — this
+   matters because it's what the advisor/original author already knows and
+   expects to see, not an arbitrary style choice.
+
+3. **Filename convention for ground-truth files**: `Re 1000.dat`, `Re3000.dat`,
+   `RE_5000.DAT` (case-insensitive, optional space/underscore/dash before the
+   number). Added `detect_param_from_filename()` using the same regex
+   pattern as the notebook's `discover_cases()`, so uploading a file named
+   e.g. "Re 2000.dat" in the Validation tab auto-fills the parameter value
+   instead of requiring manual entry.
+
+4. **Multi-case validation workflow**: the notebook always validates at
+   multiple Re values in one pass (`Re_cases = [2000, 5000]`), not one at a
+   time. Added batch mode to the Validation tab: multiple files can be
+   uploaded at once, each gets its parameter auto-detected (editable), and a
+   combined summary table (MAE/L2/L2_rel%/max per field per file) is shown,
+   with a dropdown to drill into any one file's detailed 3-panel comparison.
+
+5. **R_MODES=30 vs. actual r=4**: the notebook's hyperparameter config
+   requests up to 30 POD modes, but the actual bundled checkpoints only have
+   r=4 (Cavity/Cylinder/BFS) or r=7 (NACA0012). This is because `fit_pod()`
+   caps `r_eff = min(r, Vt.shape[0])`, and there simply weren't enough
+   training snapshots (distinct Re/α values) to support more modes. Not a
+   bug — just means each case only had a handful of training snapshots.
+   Worth knowing if the user ever discusses "why only 4 modes" with her
+   advisor: it's a data quantity limit, not a modeling choice.
+
+
 - LIC has only been generated as static preview images for all 4 cases so
   far; wired into the live app for Cavity/Cylinder specifically tested,
   should verify BFS and NACA0012 render correctly + performantly in the
