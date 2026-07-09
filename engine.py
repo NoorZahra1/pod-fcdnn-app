@@ -611,44 +611,56 @@ def save_checkpoint(trainer: PODFCDNNTrainer, path: Path) -> None:
 
 
 def load_checkpoint(path: Path, device: str = "cpu") -> PODFCDNNTrainer:
+    """
+    Loads a checkpoint, tolerant of two schemas seen in practice:
 
-    checkpoint = torch.load(
-        path,
-        map_location=device,
-        weights_only=False
-    )
+    1. The "flat" schema used by save_checkpoint() in this file / the
+       bundled app checkpoints: pod_mean, pod_phi, pod_svals, pod_xy,
+       pod_N, pod_r, model_state, x_mean, x_std, y_mean, y_std.
+    2. The schema produced directly by the original training notebook
+       (POD_FCDNN_for_cavityflow.ipynb): pod_mean, pod_Phi (capital P),
+       pod_xy, pod_N, r_modes (not pod_r), model_state_dict (not
+       model_state), and no pod_svals at all.
+
+    If a notebook-schema checkpoint is missing pod_svals (singular
+    values), it's filled with NaN of the right length rather than
+    failing — energy-spectrum diagnostics should check for this and
+    show "not available" rather than plotting nonsense.
+    """
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+    def _get(*keys, default=None, required=True):
+        for k in keys:
+            if k in checkpoint:
+                return checkpoint[k]
+        if required and default is None:
+            raise KeyError(f"None of {keys} found in checkpoint at {path}")
+        return default
+
+    phi = _get("pod_phi", "pod_Phi")
+    r = int(_get("pod_r", "r_modes"))
+    svals = _get("pod_svals", required=False, default=np.full(r, np.nan))
 
     pod = PODModel(
-        mean=checkpoint["pod_mean"],
-        Phi=checkpoint["pod_phi"],
-        svals=checkpoint["pod_svals"],
-        xy=checkpoint["pod_xy"],
-        N=checkpoint["pod_N"],
-        r=checkpoint["pod_r"]
+        mean=_get("pod_mean"),
+        Phi=phi,
+        svals=svals,
+        xy=_get("pod_xy"),
+        N=int(_get("pod_N")),
+        r=r,
     )
 
-    model = FCDNN(
-        out_dim=pod.r
-     
-    ).to(device)
+    model = FCDNN(out_dim=pod.r).to(device)
+    model.load_state_dict(_get("model_state", "model_state_dict"))
 
-    model.load_state_dict(
-        checkpoint["model_state"]
-    )
-
-    trainer = PODFCDNNTrainer.__new__(
-        PODFCDNNTrainer
-    )
-
+    trainer = PODFCDNNTrainer.__new__(PODFCDNNTrainer)
     trainer.pod = pod
     trainer.model = model
     trainer.device = torch.device(device)
-
-    trainer.x_mean = checkpoint["x_mean"]
-    trainer.x_std = checkpoint["x_std"]
-
-    trainer.y_mean = checkpoint["y_mean"]
-    trainer.y_std = checkpoint["y_std"]
+    trainer.x_mean = _get("x_mean")
+    trainer.x_std = _get("x_std")
+    trainer.y_mean = _get("y_mean")
+    trainer.y_std = _get("y_std")
 
     return trainer
 
