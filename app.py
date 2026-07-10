@@ -1,5 +1,5 @@
 """
-AeroMind Engineering Copilot Workbench
+AeroMind Engineering Copilot Workspace
 Ties multi-modal user input strings safely into underlying POD-FCDNN physics checkpoints.
 """
 
@@ -231,14 +231,14 @@ with col_right:
     if 'results' in st.session_state and process_btn:
         gx, gy, gU, gV, t_case, t_re = st.session_state['results']
         
-        # High-Fidelity Plotly Continuous Heat Contours for U
+        # High-Fidelity Plotly Continuous Heat Contours for U (FIXED COLORBAR SYNTAX)
         fig_u = go.Figure(data=[
             go.Contour(
                 x=gx, y=gy, z=gU,
                 colorscale="RdBu_r",
                 line_width=0.2,
                 contours=dict(coloring='heatmap', showlines=True),
-                colorbar=dict(title="U Velocity Component", titleside="top")
+                colorbar=dict(title=dict(text="U Velocity Component", side="top"))
             )
         ])
         fig_u.update_layout(
@@ -248,14 +248,14 @@ with col_right:
         )
         st.plotly_chart(fig_u, use_container_width=True)
         
-        # High-Fidelity Plotly Continuous Heat Contours for V
+        # High-Fidelity Plotly Continuous Heat Contours for V (FIXED COLORBAR SYNTAX)
         fig_v = go.Figure(data=[
             go.Contour(
                 x=gx, y=gy, z=gV,
                 colorscale="Balance",
                 line_width=0.2,
                 contours=dict(coloring='heatmap', showlines=True),
-                colorbar=dict(title="V Velocity Component", titleside="top")
+                colorbar=dict(title=dict(text="V Velocity Component", side="top"))
             )
         ])
         fig_v.update_layout(
