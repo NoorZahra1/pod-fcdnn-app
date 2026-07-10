@@ -621,11 +621,6 @@ def load_checkpoint(path: Path, device: str = "cpu") -> PODFCDNNTrainer:
        (POD_FCDNN_for_cavityflow.ipynb): pod_mean, pod_Phi (capital P),
        pod_xy, pod_N, r_modes (not pod_r), model_state_dict (not
        model_state), and no pod_svals at all.
-
-    If a notebook-schema checkpoint is missing pod_svals (singular
-    values), it's filled with NaN of the right length rather than
-    failing — energy-spectrum diagnostics should check for this and
-    show "not available" rather than plotting nonsense.
     """
     checkpoint = torch.load(path, map_location=device, weights_only=False)
 
@@ -637,10 +632,18 @@ def load_checkpoint(path: Path, device: str = "cpu") -> PODFCDNNTrainer:
             raise KeyError(f"None of {keys} found in checkpoint at {path}")
         return default
 
+    # 1. Handle cross-compatible architecture lookups
     phi = _get("pod_phi", "pod_Phi")
-    r = int(_get("pod_r", "r_modes"))
+    
+    try:
+        r = int(_get("pod_r", "r_modes"))
+    except KeyError:
+        # Fallback calculation if variable keys are missing entirely from storage file matrices
+        r = phi.shape[1] if len(phi.shape) > 1 else 30
+
     svals = _get("pod_svals", required=False, default=np.full(r, np.nan))
 
+    # 2. Build explicit data container
     pod = PODModel(
         mean=_get("pod_mean"),
         Phi=phi,
@@ -650,9 +653,15 @@ def load_checkpoint(path: Path, device: str = "cpu") -> PODFCDNNTrainer:
         r=r,
     )
 
+    # 3. Defensive binding to prevent downstream class attribute exceptions
+    if not hasattr(pod, 'r') or pod.r is None:
+        pod.r = r
+
+    # 4. Construct internal Neural network architecture layers smoothly
     model = FCDNN(out_dim=pod.r).to(device)
     model.load_state_dict(_get("model_state", "model_state_dict"))
 
+    # 5. Bind back runtime values safely
     trainer = PODFCDNNTrainer.__new__(PODFCDNNTrainer)
     trainer.pod = pod
     trainer.model = model
@@ -663,11 +672,3 @@ def load_checkpoint(path: Path, device: str = "cpu") -> PODFCDNNTrainer:
     trainer.y_std = _get("y_std")
 
     return trainer
-
-
-
-
-
-
-
-
